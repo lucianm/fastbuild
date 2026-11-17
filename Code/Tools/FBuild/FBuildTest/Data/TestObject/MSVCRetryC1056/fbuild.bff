@@ -1,0 +1,49 @@
+//
+// Ensure compilation is retried when the MSVC compiler fails with C1056
+//
+#include "../../testcommon.bff"
+Using( .StandardEnvironment )
+Settings {}
+
+// FakeCompiler
+// - Create an exe which fails with C1056 a given number of times
+//------------------------------------------------------------------------------
+ObjectList( 'FakeCompiler-Lib' )
+{
+    .CompilerOptions            + ' /MT'
+                                + ' -D"_CRT_SECURE_NO_WARNINGS"' // don't warn about fopen etc usage
+    .CompilerInputFiles         = '$TestRoot$/Data/TestObject/MSVCRetryC1056/FakeCompiler.cpp'
+    .CompilerOutputPath         = '$Out$/Test/Object/MSVCRetryC1056/FakeCompiler/'
+}
+Executable( 'FakeCompiler-Exe' )
+{
+    .Libraries                  = 'FakeCompiler-Lib'
+    .LinkerOutput               = '$Out$/Test/Object/MSVCRetryC1056/FakeCompiler/FakeCompiler.exe'
+    .LinkerOptions              + ' /SUBSYSTEM:CONSOLE'
+                                + ' kernel32.lib'
+                                + .CRTLibs_Static
+}
+Compiler( 'FakeCompiler' )
+{
+    .Executable                 = 'FakeCompiler-Exe'
+    .CompilerFamily             = 'msvc'
+}
+
+// Compile objects
+//------------------------------------------------------------------------------
+.Compiler                       = 'FakeCompiler'
+.CompilerInputFiles             = '$TestRoot$/Data/TestObject/MSVCRetryC1056/File.cpp'
+
+// Fails once, then succeeds
+ObjectList( 'Transient' )
+{
+    .CompilerOptions            = '"%1" "%2" 1 /c'
+    .CompilerOutputPath         = '$Out$/Test/Object/MSVCRetryC1056/Transient/'
+}
+
+// Always fails
+ObjectList( 'Persistent' )
+{
+    .CompilerOptions            = '"%1" "%2" 999 /c'
+    .CompilerOutputPath         = '$Out$/Test/Object/MSVCRetryC1056/Persistent/'
+}

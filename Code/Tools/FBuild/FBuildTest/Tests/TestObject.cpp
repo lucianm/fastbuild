@@ -642,6 +642,55 @@ TEST_CASE( TestObject, CLDependencyArgs )
 #endif
 
 //------------------------------------------------------------------------------
+#if defined( __WINDOWS__ )
+TEST_CASE( TestObject, MSVCRetryC1056 )
+{
+    // The MSVC compiler can fail with C1056 if another process is holding the
+    // object file. Ensure compilation is retried, and only a limited number of times.
+    const char * const configFile = "Tools/FBuild/FBuildTest/Data/TestObject/MSVCRetryC1056/fbuild.bff";
+    const char * const transientAttempts = "../tmp/Test/Object/MSVCRetryC1056/Transient/File.obj.attempts";
+    const char * const persistentAttempts = "../tmp/Test/Object/MSVCRetryC1056/Persistent/File.obj.attempts";
+
+    // Cleanup from old test runs
+    EnsureFileDoesNotExist( transientAttempts );
+    EnsureFileDoesNotExist( persistentAttempts );
+
+    // Transient failure
+    {
+        FBuildTestOptions options;
+        options.m_ConfigFile = configFile;
+        options.m_ForceCleanBuild = true;
+        FBuildForTest fBuild( options );
+        TEST_ASSERT( fBuild.Initialize() );
+
+        // Build succeeds on the second attempt, and the retry is reported
+        TEST_ASSERT( fBuild.Build( "Transient" ) );
+        AString attempts;
+        LoadFileContentsAsString( transientAttempts, attempts );
+        TEST_ASSERT( attempts == "2" );
+        TEST_ASSERT( GetRecordedOutput().Find( "(C1056), retrying (attempt 2 of 6)" ) );
+        TEST_ASSERT( GetRecordedOutput().Find( "fatal error C1056" ) == nullptr );
+    }
+
+    // Persistent failure
+    {
+        FBuildTestOptions options;
+        options.m_ConfigFile = configFile;
+        options.m_ForceCleanBuild = true;
+        FBuildForTest fBuild( options );
+        TEST_ASSERT( fBuild.Initialize() );
+
+        // Build fails after a limited number of attempts, and the error is reported
+        TEST_ASSERT( fBuild.Build( "Persistent" ) == false );
+        AString attempts;
+        LoadFileContentsAsString( persistentAttempts, attempts );
+        TEST_ASSERT( attempts == "6" );
+        TEST_ASSERT( GetRecordedOutput().Find( "fatal error C1056" ) );
+    }
+}
+#endif
+
+//------------------------------------------------------------------------------
 TEST_CASE( TestObject, OwnerObjectList )
 {
     // Check behavior of properties stored in OwnerObjectList

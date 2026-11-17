@@ -2387,30 +2387,53 @@ Node::BuildResult ObjectNode::CompileHelper::SpawnCompiler( Job * job,
         environmentString = compilerNode->GetEnvironmentString();
     }
 
-    // spawn the process
-    if ( false == m_Process.Spawn( compiler.Get(),
-                                   fullArgs.GetFinalArgs().Get(),
-                                   workingDir,
-                                   environmentString ) )
+    // we retry if the compiler fails in a way known to be transient
+    uint32_t attempt( 0 );
+
+    for ( ;; )
     {
+        ++attempt;
+
+        // spawn the process
+        if ( false == m_Process.Spawn( compiler.Get(),
+                                       fullArgs.GetFinalArgs().Get(),
+                                       workingDir,
+                                       environmentString ) )
+        {
+            if ( m_Process.HasAborted() )
+            {
+                return BuildResult::eAborted;
+            }
+
+            job->Error( "Failed to spawn process. Error: %s Target: '%s'\n", LAST_ERROR_STR, name.Get() );
+            job->OnSystemError();
+            return BuildResult::eFailed;
+        }
+
+        // capture all of the stdout and stderr
+        m_Out.Clear();
+        m_Err.Clear();
+        m_Process.ReadAllData( m_Out, m_Err );
+
+        // Get result
+        m_Result = m_Process.WaitForExit();
         if ( m_Process.HasAborted() )
         {
             return BuildResult::eAborted;
         }
 
-        job->Error( "Failed to spawn process. Error: %s Target: '%s'\n", LAST_ERROR_STR, name.Get() );
-        job->OnSystemError();
-        return BuildResult::eFailed;
-    }
+        if ( ShouldRetry( name, attempt ) )
+        {
+            // Wait longer before each attempt to give the other process time to release the file
+            Thread::Sleep( 100u << ( attempt - 1 ) );
+            if ( m_Process.HasAborted() )
+            {
+                return BuildResult::eAborted;
+            }
+            continue; // try again
+        }
 
-    // capture all of the stdout and stderr
-    m_Process.ReadAllData( m_Out, m_Err );
-
-    // Get result
-    m_Result = m_Process.WaitForExit();
-    if ( m_Process.HasAborted() )
-    {
-        return BuildResult::eAborted;
+        break;
     }
 
     // Handle special types of failures
@@ -2478,6 +2501,39 @@ Node::BuildResult ObjectNode::CompileHelper::SpawnCompiler( Job * job,
     }
 
     return BuildResult::eOk;
+}
+
+// CompileHelper::ShouldRetry
+//------------------------------------------------------------------------------
+bool ObjectNode::CompileHelper::ShouldRetry( const AString & name, uint32_t attempt ) const
+{
+#if defined( __WINDOWS__ )
+    const uint32_t maxAttempts = 6;
+    if ( ( m_Result == 0 ) || ( attempt >= maxAttempts ) )
+    {
+        return false;
+    }
+
+    // Did the compiler encounter "fatal error C1056: cannot update the time date stamp field"?
+    // The MSVC compiler fails to re-open the object file it just wrote if another process
+    // (typically security software scanning the new file) is holding it at that moment.
+    // The same compilation succeeds when run again.
+    // The compiler family is not checked as other compilers invoke the MSVC compiler
+    // (CUDA's nvcc for example) and forward its output.
+    if ( m_Out.Find( "error C1056" ) || m_Err.Find( "error C1056" ) )
+    {
+        FLOG_WARN( "FBuild: Warning: Compiler failed to update object file (C1056), retrying (attempt %u of %u) '%s'",
+                   ( attempt + 1 ),
+                   maxAttempts,
+                   name.Get() );
+        return true;
+    }
+#else
+    (void)name;
+    (void)attempt;
+#endif
+
+    return false;
 }
 
 // HandleSystemFailures

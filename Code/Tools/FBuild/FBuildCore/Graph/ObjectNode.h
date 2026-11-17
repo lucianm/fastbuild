@@ -287,6 +287,8 @@ protected:
         CompileHelper & operator=( CompileHelper & other ) = delete;
 
     private:
+        bool ShouldRetry( const AString & name, uint32_t attempt ) const;
+
         bool m_HandleOutput;
         Process m_Process;
         AString m_Out;
